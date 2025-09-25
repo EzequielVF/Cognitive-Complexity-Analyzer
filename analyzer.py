@@ -137,13 +137,14 @@ class ComplexityTracer:
         self.source = source
         self.lines: List[str] = source.splitlines()
                                                                          
-        self.entries: List[Tuple[int, int, int, int, bool]] = []
+        self.entries: List[Tuple[int, int, int, int, bool, ast.AST]] = []
 
     def _component(self) -> str:
         return f"{self.project_key}:{self.rel_path.as_posix()}"
 
-    def _add_at(self, lineno: int, start_col: int, end_col: int, inc: int, apply_nesting: bool = True) -> None:
-        self.entries.append((lineno, start_col, end_col, inc, apply_nesting))
+    def _add_at(self, lineno: int, start_col: int, end_col: int, inc: int, apply_nesting: bool = True, node: Optional[ast.AST] = None) -> None:
+        dummy = node if node is not None else ast.Pass()
+        self.entries.append((lineno, start_col, end_col, inc, apply_nesting, dummy))
 
     def _line(self, lineno: int) -> str:
         if 1 <= lineno <= len(self.lines):
@@ -229,24 +230,24 @@ class ComplexityTracer:
                 has_else = bool(node.orelse) and not (len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If))
                                                                                                    
                 if_inc = max(1, inc_next)
-                self._add_at(line, pos, pos + 2, if_inc, apply_nesting=(if_inc > 1))
+                self._add_at(line, pos, pos + 2, if_inc, apply_nesting=(if_inc > 1), node=node)
                            
                 if has_else:
                     et = self._find_else_token(node)
                     if et:
                         eline, ecol, eend = et
-                        self._add_at(eline, ecol, eend, 1, apply_nesting=False)
+                        self._add_at(eline, ecol, eend, 1, apply_nesting=False, node=node)
             elif isinstance(node, ast.For):
                 pos = getattr(node, "col_offset", 0) or 0
                 line = node.lineno
                 has_else = bool(getattr(node, "orelse", None))
                 for_inc = max(1, inc_next)
-                self._add_at(line, pos, pos + 3, for_inc, apply_nesting=(for_inc > 1))
+                self._add_at(line, pos, pos + 3, for_inc, apply_nesting=(for_inc > 1), node=node)
                 if has_else:
                     et = self._find_else_token(node)
                     if et:
                         eline, ecol, eend = et
-                        self._add_at(eline, ecol, eend, 1, apply_nesting=False)
+                        self._add_at(eline, ecol, eend, 1, apply_nesting=False, node=node)
             elif isinstance(node, ast.AsyncFor):
                                                     
                 start = getattr(node, "col_offset", 0) or 0
@@ -256,23 +257,23 @@ class ComplexityTracer:
                 e = s + 3
                 has_else = bool(getattr(node, "orelse", None))
                 for_inc = max(1, inc_next)
-                self._add_at(line, s, e, for_inc, apply_nesting=(for_inc > 1))
+                self._add_at(line, s, e, for_inc, apply_nesting=(for_inc > 1), node=node)
                 if has_else:
                     et = self._find_else_token(node)                          
                     if et:
                         eline, ecol, eend = et
-                        self._add_at(eline, ecol, eend, 1, apply_nesting=False)
+                        self._add_at(eline, ecol, eend, 1, apply_nesting=False, node=node)
             elif isinstance(node, ast.While):
                 pos = getattr(node, "col_offset", 0) or 0
                 line = node.lineno
                 has_else = bool(getattr(node, "orelse", None))
                 while_inc = max(1, inc_next)
-                self._add_at(line, pos, pos + 5, while_inc, apply_nesting=(while_inc > 1))
+                self._add_at(line, pos, pos + 5, while_inc, apply_nesting=(while_inc > 1), node=node)
                 if has_else:
                     et = self._find_else_token(node)                          
                     if et:
                         eline, ecol, eend = et
-                        self._add_at(eline, ecol, eend, 1, apply_nesting=False)
+                        self._add_at(eline, ecol, eend, 1, apply_nesting=False, node=node)
             elif isinstance(node, ast.IfExp):
                 seg = ast.get_source_segment(self.source, node) or ""
                 base_line = getattr(node, "lineno", 1) or 1
@@ -286,7 +287,7 @@ class ComplexityTracer:
                             abs_line = base_line + (line_off - 1)
                             abs_col = base_col + col_off if line_off == 1 else col_off
                             ifexp_inc = max(1, inc_next)
-                            self._add_at(abs_line, abs_col, abs_col + 2, ifexp_inc, apply_nesting=(ifexp_inc > 1))
+                            self._add_at(abs_line, abs_col, abs_col + 2, ifexp_inc, apply_nesting=(ifexp_inc > 1), node=node)
                             marked = True
                             break
                 except Exception:
@@ -294,11 +295,11 @@ class ComplexityTracer:
                 if not marked:
                     pos = getattr(node, "col_offset", 0) or 0
                     ifexp_inc = max(1, inc_next)
-                    self._add_at(node.lineno, pos, pos + 2, ifexp_inc, apply_nesting=(ifexp_inc > 1))
+                    self._add_at(node.lineno, pos, pos + 2, ifexp_inc, apply_nesting=(ifexp_inc > 1), node=node)
             elif isinstance(node, ast.ExceptHandler):
                 pos = getattr(node, "col_offset", 0) or 0
                 exc_inc = max(1, inc_next)
-                self._add_at(node.lineno, pos, pos + 6, exc_inc, apply_nesting=(exc_inc > 1))
+                self._add_at(node.lineno, pos, pos + 6, exc_inc, apply_nesting=(exc_inc > 1), node=node)
             elif isinstance(node, ast.BoolOp):
                                                                               
                 seg = ast.get_source_segment(self.source, node) or ""
@@ -312,7 +313,7 @@ class ComplexityTracer:
                             abs_line = base_line + (line_off - 1)
                             abs_col = base_col + col_off if line_off == 1 else col_off
                                                                          
-                            self._add_at(abs_line, abs_col, abs_col + len(tok.string), base, apply_nesting=False)
+                            self._add_at(abs_line, abs_col, abs_col + len(tok.string), base, apply_nesting=False, node=node)
                             break
                 except Exception:
                     pass
@@ -355,13 +356,13 @@ class ComplexityTracer:
                         lineno = getattr(n.func, "lineno", None)
                         col = getattr(n.func, "col_offset", None)
                         if isinstance(lineno, int) and isinstance(col, int):
-                            self._add_at(lineno, col, col + len(self.func_name), 1, apply_nesting=False)
+                            self._add_at(lineno, col, col + len(self.func_name), 1, apply_nesting=False, node=n)
                             break
 
     def to_flows(self) -> List[dict]:
         flows: List[dict] = []
         comp = self._component()
-        for lineno, start, end, inc, apply_nesting in self.entries:
+        for lineno, start, end, inc, apply_nesting, node in self.entries:
             if inc <= 1:
                 msg = "+1"
             else:
@@ -371,6 +372,15 @@ class ComplexityTracer:
                     msg = f"+{inc} (incl {nesting} for nesting)"
                 else:
                     msg = f"+{inc}"
+            try:
+                sub_tracer = ComplexityTracer(self.project_key, self.rel_path, self.func_name, self.source)
+                sub_tracer._trace(node, increment_by=0)
+                tree_points = 0
+                for _l, _s, _e, _inc, _an, _n in sub_tracer.entries:
+                    tree_points += max(0, int(_inc))
+            except Exception:
+                tree_points = 0
+
             flows.append(
                 {
                     "locations": [
@@ -382,8 +392,8 @@ class ComplexityTracer:
                                 "startOffset": start,
                                 "endOffset": end,
                             },
-                            "msg": msg,
-                            "msgFormattings": [],
+                            "points": msg,
+                            "treePoints": tree_points,
                         }
                     ]
                 }
@@ -488,7 +498,7 @@ def make_issue(
                                                                           
         for f in flows:
             loc = f.get("locations", [{}])[0]
-            msg: str = loc.get("msg", "")
+            msg: str = loc.get("points", "")
                                                                 
             m = re.match(r"\+(\d+)", msg)
             if m:
