@@ -1,0 +1,1 @@
+python analyzer.py --project C:\ruta --output resultados.json --force
